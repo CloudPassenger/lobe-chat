@@ -1,4 +1,4 @@
-import { Column, asc, count, inArray, like, sql } from 'drizzle-orm';
+import { asc, count, inArray } from 'drizzle-orm';
 import { and, desc, eq, isNull, not, or } from 'drizzle-orm/expressions';
 
 import { appEnv } from '@/config/app';
@@ -267,29 +267,29 @@ export class SessionModel {
     const { pinned, keyword, group, pageSize = 9999, current = 0 } = params;
 
     const offset = current * pageSize;
-    return serverDB.query.sessions.findMany({
+    const sessionsWithAgents = await serverDB.query.sessions.findMany({
       limit: pageSize,
       offset,
       orderBy: [desc(sessions.updatedAt)],
       where: and(
         eq(sessions.userId, this.userId),
         pinned !== undefined ? eq(sessions.pinned, pinned) : eq(sessions.userId, this.userId),
-        keyword
-          ? or(
-              like(
-                sql`lower(${sessions.title})` as unknown as Column,
-                `%${keyword.toLowerCase()}%`,
-              ),
-              like(
-                sql`lower(${sessions.description})` as unknown as Column,
-                `%${keyword.toLowerCase()}%`,
-              ),
-            )
-          : eq(sessions.userId, this.userId),
         group ? eq(sessions.groupId, group) : isNull(sessions.groupId),
       ),
-
-      with: { agentsToSessions: { columns: {}, with: { agent: true } }, group: true },
+      with: { agentsToSessions: { with: { agent: true } }, group: true },
     });
+
+    if (!keyword) return sessionsWithAgents;
+
+    const filteredSessions = sessionsWithAgents.filter((session) => {
+      const targetAgent: AgentItem = session.agentsToSessions?.[0]?.agent;
+      return (
+        targetAgent.title?.toLowerCase().includes(keyword) ||
+        targetAgent.description?.toLowerCase().includes(keyword) ||
+        targetAgent.tags?.some((tag) => tag.toLowerCase().includes(keyword))
+      );
+    });
+
+    return filteredSessions;
   }
 }
